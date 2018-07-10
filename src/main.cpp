@@ -13,9 +13,6 @@ protected:
 
 	bool init(int argc, const char* argv[]) override
 	{
-		m_should_render = true;
-		m_num_frames = 0;
-
 		if (!load_shaders())
 			return false;
 
@@ -52,15 +49,20 @@ protected:
 
 	void update(double delta) override
 	{
+		// Check if camera had moved.
+		check_camera_movement();
+
 		// Update camera.
 		update_camera();
 
-		// Perform path tracing if required
-		//if (m_should_render)
-			path_trace();
+		// Perform path tracing 
+		path_trace();
 
 		// Render image to screen
 		render_to_backbuffer();
+
+		// Set back to false before checking movement next frame.
+		m_camera_moved = false;
 	}
 
 	// -----------------------------------------------------------------------------------------------------------------------------------
@@ -79,7 +81,7 @@ protected:
 		settings.resizable = false;
 		settings.width = 1280;
 		settings.height = 720;
-		settings.title = "Progressive Path Tracer - Dihara Wijetunga (c) 2018";
+		settings.title = "GPU Path Tracer - Dihara Wijetunga (c) 2018";
 
 		return settings;
 	}
@@ -148,19 +150,27 @@ private:
 
 	// -----------------------------------------------------------------------------------------------------------------------------------
 
+	void check_camera_movement()
+	{
+		if (m_mouse_look && (m_mouse_delta_x != 0 || m_mouse_delta_y != 0) || m_heading_speed != 0.0f || m_sideways_speed != 0.0f)
+			m_camera_moved = true;
+		else
+			m_camera_moved = false;
+	}
+
+	// -----------------------------------------------------------------------------------------------------------------------------------
+
 	void path_trace()
 	{
-		// Swap
-		dw::Texture* temp = m_read;
-		m_read = m_write;
-		m_write = temp;
-
-		m_read->bind_image(0, 0, 0, GL_READ_ONLY, GL_RGBA32F);
-		m_write->bind_image(1, 0, 0, GL_WRITE_ONLY, GL_RGBA32F);
-
+		m_image->bind_image(0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
+		
 		m_path_tracer_program->use();
 
+		if (m_camera_moved)
+			m_num_frames = 0;
+
 		m_path_tracer_program->set_uniform("u_NumFrames", m_num_frames);
+		m_path_tracer_program->set_uniform("u_Accum", float(m_num_frames) / float(m_num_frames + 1));
 		m_path_tracer_program->set_uniform("u_FOV", glm::radians(m_main_camera->m_fov));
 		m_path_tracer_program->set_uniform("u_AspectRatio", m_aspect_ratio);
 		m_path_tracer_program->set_uniform("u_Resolution", m_resolution);
@@ -171,7 +181,6 @@ private:
 
 		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
-		m_should_render = false;
 		m_num_frames++;
 	}
 
@@ -188,7 +197,7 @@ private:
 		m_present_program->use();
 
 		if (m_present_program->set_uniform("s_Image", 0))
-			m_write->bind(0);
+			m_image->bind(0);
 
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
@@ -250,17 +259,9 @@ private:
 
 	void create_image()
 	{
-		m_image1 = std::make_unique<dw::Texture2D>(m_width, m_height, 1, 1, 1, GL_RGBA32F, GL_RGBA, GL_FLOAT);
-		m_image1->set_min_filter(GL_LINEAR);
-		m_image1->set_wrapping(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
-
-		m_write = m_image1.get();
-
-		m_image2 = std::make_unique<dw::Texture2D>(m_width, m_height, 1, 1, 1, GL_RGBA32F, GL_RGBA, GL_FLOAT);
-		m_image2->set_min_filter(GL_LINEAR);
-		m_image2->set_wrapping(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
-
-		m_read = m_image1.get();
+		m_image = std::make_unique<dw::Texture2D>(m_width, m_height, 1, 1, 1, GL_RGBA32F, GL_RGBA, GL_FLOAT);
+		m_image->set_min_filter(GL_LINEAR);
+		m_image->set_wrapping(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
 	}
 
 	// -----------------------------------------------------------------------------------------------------------------------------------
@@ -320,29 +321,24 @@ private:
 	// -----------------------------------------------------------------------------------------------------------------------------------
 
 private:
-	bool m_should_render;
-
 	// GPU Resources.
 	std::unique_ptr<dw::Shader>  m_present_vs;
 	std::unique_ptr<dw::Shader>  m_present_fs;
 	std::unique_ptr<dw::Program> m_present_program;
 	std::unique_ptr<dw::Shader>  m_path_tracer_cs;
 	std::unique_ptr<dw::Program> m_path_tracer_program;
-	std::unique_ptr<dw::Texture> m_image1;
-	std::unique_ptr<dw::Texture> m_image2;
-	dw::Texture* m_read;
-	dw::Texture* m_write;
+	std::unique_ptr<dw::Texture> m_image;
 	std::unique_ptr<dw::VertexBuffer> m_quad_vbo;
 	std::unique_ptr<dw::VertexArray>  m_quad_vao;
 
 	// Uniforms
 	float m_aspect_ratio;
 	glm::vec2 m_resolution;
-	int32_t m_num_frames;
+	int32_t m_num_frames = 0;
 
 	// Camera controls.
 	bool m_mouse_look = false;
-	bool m_debug_mode = false;
+	bool m_camera_moved = false;
 	float m_heading_speed = 0.0f;
 	float m_sideways_speed = 0.0f;
 	float m_camera_sensitivity = 0.005f;

@@ -3,14 +3,14 @@
 // ------------------------------------------------------------------
 
 layout (local_size_x = 1, local_size_y = 1) in;
-layout (binding = 0, rgba32f) readonly uniform image2D I_Input;
-layout (binding = 1, rgba32f) writeonly uniform image2D I_Output;
+layout (binding = 0, rgba32f) uniform image2D img_framebuffer;
 
 // ------------------------------------------------------------------
 // UNIFORMS ---------------------------------------------------------
 // ------------------------------------------------------------------
 
 uniform int u_NumFrames;
+uniform float u_Accum;
 uniform float u_FOV;
 uniform float u_AspectRatio;
 uniform vec2 u_Resolution;
@@ -22,6 +22,7 @@ uniform mat4 u_InvProjectionMat;
 // ------------------------------------------------------------------
 
 const float kPI = 3.14159265359;
+const int kSamplesPerPixel = 4;
 
 // ------------------------------------------------------------------
 // STRUCTURES -------------------------------------------------------
@@ -249,11 +250,9 @@ vec3 trace(in Ray ray, in Scene scene)
 void main()
 {
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
-    vec2 tex_coord = vec2(pixel_coords) / u_Resolution;
+   
 
     state = gl_GlobalInvocationID.x * 1973 + gl_GlobalInvocationID.y * 9277 + uint(u_NumFrames) * 2699 | 1;
-
-    Ray ray = compute_ray(tex_coord.x, tex_coord.y);
 
     Scene scene;
 
@@ -267,12 +266,23 @@ void main()
     scene.spheres[1].position = vec3(0.0, -1010.0, 0.0);
     scene.spheres[1].diffuse = vec3(1.0, 1.0, 1.0);
 
-    vec3 color = trace(ray, scene);
-    vec3 prev_color = imageLoad(I_Input, pixel_coords).rgb;
+    vec3 color = vec3(0.0);
 
-    vec3 final = mix(color, prev_color, 0.0);
+    for (int i = 0; i < kSamplesPerPixel; i++)
+    {
+        vec2 altered_coord = vec2(pixel_coords.x + random_float_01(state), pixel_coords.y +  + random_float_01(state));
+        vec2 tex_coord = altered_coord / u_Resolution;
+        Ray ray = compute_ray(tex_coord.x, tex_coord.y);
+        color += trace(ray, scene);
+    }
 
-    imageStore(I_Output, pixel_coords, vec4(final, 1.0));
+    color /= float(kSamplesPerPixel);
+
+    vec3 prev_color = imageLoad(img_framebuffer, pixel_coords).rgb;
+
+    vec3 final = mix(color, prev_color, u_Accum);
+
+    imageStore(img_framebuffer, pixel_coords, vec4(final, 1.0));
 }
 
 // ------------------------------------------------------------------
